@@ -286,7 +286,7 @@ import { useState } from "react";
 
 export function ChatApp() {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-  const { agents, createAgent, appStatus } = useApp({ appId: "default" });
+  const { agents, createAgent, status } = useApp({ appId: "default" });
 
   const handleCreate = async () => {
     const agent = await createAgent({ title: "New Assistant" });
@@ -295,7 +295,7 @@ export function ChatApp() {
 
   return (
     <div>
-      <button onClick={handleCreate} disabled={appStatus !== "connected"}>
+      <button onClick={handleCreate} disabled={status !== "connected"}>
         New Chat
       </button>
 
@@ -312,7 +312,7 @@ export function ChatApp() {
 
 function ChatPane({ agentId }: { agentId: string }) {
   const [input, setInput] = useState("");
-  const { chat, agentStatus } = useAgent({ agentId });
+  const { chat, status } = useAgent({ agentId });
 
   const handleSend = (event: React.FormEvent) => {
     event.preventDefault();
@@ -325,7 +325,7 @@ function ChatPane({ agentId }: { agentId: string }) {
 
   return (
     <div>
-      <p>Connection: {agentStatus}</p>
+      <p>Connection: {status}</p>
       <div>
         {chat.messages.map((message) => (
           <p key={message.id}>
