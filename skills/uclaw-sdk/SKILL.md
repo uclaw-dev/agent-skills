@@ -280,7 +280,19 @@ If the project uses a different framework, keep the same architecture:
 
 Use `@uclaw/sdk/react` in browser components after the client-token route exists.
 
+`useAgent({ agentId })` returns a `chat` field that follows the AI SDK `useChat` return shape. Treat it as the chat controller for the active UClaw agent:
+
+- Read `chat.messages` to render the conversation.
+- Read `chat.status` and `chat.error` to render streaming, ready, and error states.
+- Call `chat.sendMessage({ role: "user", parts: [{ type: "text", text: ... }] })` to submit a user message.
+- Call `chat.regenerate(...)`, `chat.stop()`, `chat.clearError()`, `chat.resumeStream()`, or `chat.setMessages(...)` when building richer chat controls.
+- For tool workflows, use the tool-result helpers exposed by the AI SDK-compatible return object, such as `chat.addToolResult(...)`, when present in the installed SDK version.
+
+Reference: AI SDK `useChat` returns documentation: https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat#returns
+
 ```tsx
+"use client";
+
 import { useApp, useAgent } from "@uclaw/sdk/react";
 import { useState } from "react";
 
