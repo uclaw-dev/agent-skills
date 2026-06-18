@@ -13,20 +13,26 @@ Prefer the production SDK package, `@uclaw/sdk`. The `@uclaw/cli` package is exp
 
 ## Pre-work Technical Decisions & Architecture Alignment
 
-Before writing code or configuring UClaw agents/applications, you must align on the following four technical decisions with the user. If they are not specified, ask or suggest defaults based on the following guidelines:
+Before writing code or configuring UClaw agents/applications, you must align on the following five technical decisions with the user. If they are not specified, ask or suggest defaults based on the following guidelines:
 
 1. **Scenario Target (Server-Side vs Frontend)**:
    - **Server-Side**: Run UClaw's `AppClient` in server scripts, APIs, background jobs, or workers. Requires `UCLAW_API_KEY` on the server (never leaked to browser).
    - **Frontend**: Connect to agent sessions in browser components using React hooks (`@uclaw/sdk/react` such as `useApp` or `useAgent`). Secure this by setting up a token exchange server route (e.g. `/api/uclaw/client-tokens`) that exchanges `UCLAW_API_KEY` for short-lived client tokens.
-2. **Agent Orchestration**:
+2. **App Identity & Data Boundary**:
+   - Choose an explicit `appId` for each product, project, tenant, or environment before creating agents.
+   - Treat `appId` as the real data isolation boundary for agents, history, workspace state, and secrets. `UCLAW_API_KEY` authenticates the account/request, but it does not create a fresh data namespace by itself.
+   - Avoid using `appId: "default"` in new projects unless the user intentionally wants to connect to the account's existing default app data. Reusing `default` can reveal or continue historical agents from previous experiments.
+   - Rotating or changing the API key does not isolate data if the code keeps using the same `appId`.
+   - Use stable, descriptive IDs such as `my-product-dev`, `my-product-prod`, or `customer-portal-staging`, and pass the same `appId` consistently to server `AppClient`, token routes, `useApp`, and `useAgent`.
+3. **Agent Orchestration**:
    - **Global Unique Agent**: A single agent session. Ideal for single-user stateless utilities or simple one-off tasks where user data is ephemeral.
    - **Multiple Named Agents**: Multiple distinct agent sessions (tracked via unique IDs/titles). Ideal for persistent multi-chat interfaces, multi-user systems, or separate projects.
    - **App-Agent Hierarchy**: The parent application layer manages a directory/collection of distinct agent sessions (listing, creating, and deleting agents via `useApp` or `AppClient`). Ideal when the application needs to dynamically spawn and maintain separate persistent chats/agents for different users or contexts.
-3. **Model Selection**:
+4. **Model Selection**:
    - Determine the provider and performance level required.
    - Configure using `modelProvider` (e.g., `"openai"`, `"anthropic"`, `"deepseek"`) and `modelTier: "fast" | "balanced" | "capable"` (defaults to `"balanced"`). This avoids pinning direct model names (which may go unsupported later) and allows the platform to route to the best available models.
    - Only use `model` (e.g. `"openai/gpt-5.5"`, `"anthropic/claude-opus-4.8"`) as a fallback override if a specific model version is explicitly requested.
-4. **Capabilities & Extensions**:
+5. **Capabilities & Extensions**:
    - Select the minimum set of capabilities required:
      - `read`: access to read workspace files (`read`, `list`, `find`, `grep` tools).
      - `write`: access to edit/write/delete workspace files (`write`, `edit`, `delete` tools).
@@ -52,6 +58,8 @@ Use this skill when the user asks to:
 ## Working Principles
 
 - Keep `UCLAW_API_KEY` server-side. Never place it in browser code, React client components, public bundles, or frontend environment variables.
+- Do not confuse authentication with data isolation: `UCLAW_API_KEY` authenticates access, while `appId` selects the app data namespace.
+- Always choose and document an explicit `appId` for new projects. Do not default to `appId: "default"` unless the user knowingly wants to reuse the account's existing default app history.
 - Store `UCLAW_API_KEY` in the project-local `.env` file, not in global shell files such as `~/.zshrc`, `~/.bashrc`, or machine-wide environment settings.
 - Never ask the user to paste an API key into chat. Give local terminal instructions that let the user edit `.env` themselves.
 - Install `@uclaw/sdk` into the user's project. Do not install it globally.
@@ -185,9 +193,11 @@ Use `AppClient` in server-side scripts, API routes, workers, or background jobs.
 ```typescript
 import { AppClient } from "@uclaw/sdk";
 
+const appId = "my-product-dev";
+
 const app = new AppClient({
   apiKey: process.env.UCLAW_API_KEY,
-  appId: "default",
+  appId,
 });
 
 // Configure an agent with specific capabilities and custom extensions
@@ -261,8 +271,11 @@ In a Next.js App Router project, create `app/api/uclaw/[...all]/route.ts`:
 ```typescript
 import { AppClient } from "@uclaw/sdk";
 
+const appId = "my-product-dev";
+
 const app = new AppClient({
   apiKey: process.env.UCLAW_API_KEY,
+  appId,
 });
 
 export const POST = (request: Request) => app.handler(request);
@@ -275,6 +288,7 @@ If the project uses a different framework, keep the same architecture:
 - A server-only endpoint owns `UCLAW_API_KEY`.
 - Browser code calls that endpoint for short-lived client tokens.
 - The master API key never crosses into client-side code.
+- The server and browser hooks use the same explicit `appId` for the intended app namespace.
 
 ## React Hooks Usage
 
@@ -296,9 +310,11 @@ Reference: AI SDK `useChat` returns documentation: https://ai-sdk.dev/docs/refer
 import { useApp, useAgent } from "@uclaw/sdk/react";
 import { useState } from "react";
 
+const appId = "my-product-dev";
+
 export function ChatApp() {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-  const { agents, createAgent, status } = useApp({ appId: "default" });
+  const { agents, createAgent, status } = useApp({ appId });
 
   const handleCreate = async () => {
     const agent = await createAgent({ title: "New Assistant" });
@@ -324,7 +340,7 @@ export function ChatApp() {
 
 function ChatPane({ agentId }: { agentId: string }) {
   const [input, setInput] = useState("");
-  const { chat, status } = useAgent({ agentId });
+  const { chat, status } = useAgent({ appId, agentId });
 
   const handleSend = (event: React.FormEvent) => {
     event.preventDefault();
