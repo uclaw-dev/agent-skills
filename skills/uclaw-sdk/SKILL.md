@@ -11,6 +11,32 @@ Use this skill to help users install and use `@uclaw/sdk`, the official TypeScri
 
 Prefer the production SDK package, `@uclaw/sdk`. The `@uclaw/cli` package is experimental and for internal testing only, so do not recommend it for normal user workflows unless the user specifically asks about the CLI and accepts the risk.
 
+## Pre-work Technical Decisions & Architecture Alignment
+
+Before writing code or configuring UClaw agents/applications, you must align on the following four technical decisions with the user. If they are not specified, ask or suggest defaults based on the following guidelines:
+
+1. **Scenario Target (Server-Side vs Frontend)**:
+   - **Server-Side**: Run UClaw's `AppClient` in server scripts, APIs, background jobs, or workers. Requires `UCLAW_API_KEY` on the server (never leaked to browser).
+   - **Frontend**: Connect to agent sessions in browser components using React hooks (`@uclaw/sdk/react` such as `useApp` or `useAgent`). Secure this by setting up a token exchange server route (e.g. `/api/uclaw/client-tokens`) that exchanges `UCLAW_API_KEY` for short-lived client tokens.
+2. **Agent Orchestration**:
+   - **Global Unique Agent**: A single agent session. Ideal for single-user stateless utilities or simple one-off tasks where user data is ephemeral.
+   - **Multiple Named Agents**: Multiple distinct agent sessions (tracked via unique IDs/titles). Ideal for persistent multi-chat interfaces, multi-user systems, or separate projects.
+   - **App-Agent Hierarchy**: The parent application layer manages a directory/collection of distinct agent sessions (listing, creating, and deleting agents via `useApp` or `AppClient`). Ideal when the application needs to dynamically spawn and maintain separate persistent chats/agents for different users or contexts.
+3. **Model Selection**:
+   - Determine the provider and performance level required.
+   - Configure using `modelProvider` (e.g., `"openai"`, `"anthropic"`, `"deepseek"`) and `modelTier: "fast" | "balanced" | "capable"` (defaults to `"balanced"`). This avoids pinning direct model names (which may go unsupported later) and allows the platform to route to the best available models.
+   - Only use `model` (e.g. `"openai/gpt-5.5"`, `"anthropic/claude-opus-4.8"`) as a fallback override if a specific model version is explicitly requested.
+4. **Capabilities & Extensions**:
+   - Select the minimum set of capabilities required:
+     - `read`: access to read workspace files (`read`, `list`, `find`, `grep` tools).
+     - `write`: access to edit/write/delete workspace files (`write`, `edit`, `delete` tools).
+     - `execute`: run code in sandboxed workers (`bash` and `execute` tools).
+     - `database`: SQL database access in workspace (`sql` tool).
+     - `network`: external network access from execute scripts.
+     - `secret`: secrets management (`add_secret`, `list_secrets`, `remove_secret` tools).
+     - `browser`: browser scraping/interaction (Chrome CDP browser tool).
+   - Configure custom tools under `extensions` using the `ExtensionDefinition` format for custom execution tasks.
+
 ## When To Use This Skill
 
 Use this skill when the user asks to:
@@ -53,7 +79,6 @@ Before using UClaw functionality in a project, check the local JavaScript enviro
    It is fine if some commands are missing. Use the ones that exist.
 
 3. Detect the preferred package manager from the project, in this order:
-
    - `package.json` `packageManager` field, if present.
    - Lockfiles:
      - `pnpm-lock.yaml` -> `pnpm`
@@ -64,7 +89,6 @@ Before using UClaw functionality in a project, check the local JavaScript enviro
    - If no evidence exists, use `npm` because it ships with Node.js.
 
 4. If a package manager is implied but missing:
-
    - For `pnpm` or `yarn`, prefer `corepack enable` when the installed Node version supports Corepack.
    - For `bun`, tell the user Bun is required for this project and ask before installing it.
    - Do not switch package managers just because another one is installed; mixing lockfiles causes avoidable dependency drift.
@@ -166,15 +190,45 @@ const app = new AppClient({
   appId: "default",
 });
 
+// Configure an agent with specific capabilities and custom extensions
 const agent = await app.agents.create({
-  title: "Travel Researcher",
+  title: "Dev Helper Agent",
   config: {
-    modelTier: "fast",
-    instructions: "You are a travel researcher. Suggest top spots.",
+    modelTier: "capable", // Use high-performance model for complex tasks
+    instructions: "You are a development helper. You can read/write files and run bash scripts.",
+    capabilities: [
+      "read", // Allows file read tools: read, list, find, grep
+      "write", // Allows file write tools: write, edit, delete
+      "execute", // Allows bash execution in workspace and the execute tool
+      "network", // Allows outgoing network requests from execute code
+      "secret", // Allows secrets replacement and management
+      "browser", // Allows Chrome browser tools via CDP
+    ],
+    extensions: [
+      {
+        name: "custom_fetch_api",
+        description: "Fetch data from an API and print it to workspace",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "The API endpoint URL" },
+          },
+          required: ["url"],
+        },
+        code: `async (args) => {
+          // Can call fetch because "network" capability is enabled
+          const res = await fetch(args.url);
+          const data = await res.json();
+          // Write to state using workspace tools
+          await state.writeFile("api_response.json", JSON.stringify(data, null, 2));
+          return "Saved API response to api_response.json";
+        }`,
+      },
+    ],
   },
 });
 
-const run = await agent.run("Plan a 3-day itinerary for Tokyo.");
+const run = await agent.run("Fetch and save users from https://jsonplaceholder.typicode.com/users");
 
 for await (const event of run.stream()) {
   if (event.type === "text-delta" && event.delta) {
